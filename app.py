@@ -1,6 +1,6 @@
 """
 app.py
-Interactive Streamlit Web Application for the Research Paper Analyzer.
+Interactive Streamlit Web Application for Paper Scalpel.
 Supports Local AI (Ollama / llama.cpp) and Cloud LLM APIs with real-time
 token streaming across 5 specialized tabs and 1-click Markdown/JSON export.
 """
@@ -9,7 +9,8 @@ from __future__ import annotations
 
 import hashlib
 import os
-from typing import Dict, List
+import re
+from collections.abc import Mapping, MutableMapping
 
 import streamlit as st
 from dotenv import load_dotenv
@@ -22,28 +23,139 @@ from llm_engine import (
     LLMConfig,
     ProviderMode,
 )
-from parser import AcademicPaperParser, ParsedPaper
+from parser import AcademicPaperParser, ParsedPaper, estimate_tokens
 
 load_dotenv()
 
-st.set_page_config(
-    page_title="Research Paper Deep Teardown Studio",
-    page_icon="🔬",
-    layout="wide",
-    initial_sidebar_state="expanded",
-)
+CTX_OPTIONS: list[int] = [8192, 16384, 32768, 65536, 128000, 131072, 200000]
+
+PROVIDER_API_KEY_ENV_MAP: dict[ProviderMode, tuple[str, ...]] = {
+    ProviderMode.CLOUD_MOONSHOT: ("MOONSHOT_API_KEY", "LLM_API_KEY"),
+    ProviderMode.CLOUD_OPENAI: ("OPENAI_API_KEY", "LLM_API_KEY"),
+    ProviderMode.CLOUD_GEMINI: ("GEMINI_API_KEY", "LLM_API_KEY"),
+    ProviderMode.CLOUD_ANTHROPIC: ("ANTHROPIC_API_KEY", "LLM_API_KEY"),
+    ProviderMode.CUSTOM_ENDPOINT: (
+        "LLM_API_KEY",
+        "OPENAI_API_KEY",
+        "MOONSHOT_API_KEY",
+        "GEMINI_API_KEY",
+        "ANTHROPIC_API_KEY",
+    ),
+}
+
+
+def sanitize_export_filename(title: str, extension: str, max_length: int = 45) -> str:
+    """Converts an arbitrary PDF title into a safe cross-platform export filename."""
+    cleaned = re.sub(r"[^A-Za-z0-9._-]+", "_", title or "")
+    cleaned = re.sub(r"\.{2,}", "_", cleaned)
+    cleaned = re.sub(r"_+", "_", cleaned)
+    stem = cleaned.strip("._-")[:max_length].strip("._-")
+    if not stem:
+        stem = "paper"
+    ext = extension.lstrip(".")
+    return f"{stem}_teardown.{ext}"
+
+
+def resolve_provider_api_key(
+    provider: ProviderMode,
+    env: Mapping[str, str] | None = None,
+) -> str:
+    """Looks up the provider-appropriate API key from environment variables."""
+    if provider in (ProviderMode.LOCAL_OLLAMA, ProviderMode.LOCAL_LLAMACPP):
+        return "local-no-key-required"
+
+    env_map = os.environ if env is None else env
+    for var_name in PROVIDER_API_KEY_ENV_MAP.get(provider, ("LLM_API_KEY",)):
+        value = env_map.get(var_name, "").strip()
+        if value:
+            return value
+    return ""
+
+
+def _nearest_ctx_option(target_ctx: int) -> int:
+    """Returns the closest supported context window option for the UI slider."""
+    return min(CTX_OPTIONS, key=lambda opt: abs(opt - target_ctx))
+
+
+def resolve_provider_settings(
+    provider: ProviderMode,
+    use_env_overrides: bool = False,
+    env: Mapping[str, str] | None = None,
+) -> dict[str, object]:
+    """
+    Resolves `base_url`, `model_name`, `api_key`, and `num_ctx` for a provider.
+    `LLM_BASE_URL` and `LLM_MODEL_NAME` are only applied when `use_env_overrides=True`
+    (initial load or Custom Endpoint) so explicit provider switches always use
+    the chosen provider's defaults.
+    """
+    env_map = os.environ if env is None else env
+    defaults = PROVIDER_DEFAULTS[provider]
+
+    default_url = str(defaults["base_url"])
+    default_model = str(defaults["default_model"])
+    default_ctx = _nearest_ctx_option(int(defaults["default_ctx"]))
+
+    if use_env_overrides:
+        base_url = env_map.get("LLM_BASE_URL", "").strip() or default_url
+        model_name = env_map.get("LLM_MODEL_NAME", "").strip() or default_model
+    else:
+        base_url = default_url
+        model_name = default_model
+
+    return {
+        "base_url": base_url,
+        "model_name": model_name,
+        "api_key": resolve_provider_api_key(provider, env=env_map),
+        "num_ctx": default_ctx,
+    }
+
+
+def sync_provider_state(
+    session_state: MutableMapping[str, object],
+    selected_provider: ProviderMode,
+    env: Mapping[str, str] | None = None,
+) -> bool:
+    """
+    Synchronizes sidebar state when the selected provider changes.
+    Clears stale detected models/status and avoids letting `LLM_BASE_URL` or
+    `LLM_MODEL_NAME` override explicit switches between preset providers.
+    """
+    prev_provider = session_state.get("last_provider")
+    if prev_provider == selected_provider:
+        return False
+
+    is_initial_load = prev_provider is None
+    use_env_overrides = is_initial_load or selected_provider == ProviderMode.CUSTOM_ENDPOINT
+    settings = resolve_provider_settings(
+        selected_provider,
+        use_env_overrides=use_env_overrides,
+        env=env,
+    )
+
+    session_state["endpoint_models"] = []
+    session_state["endpoint_status"] = ""
+    session_state["endpoint_base_url"] = ""
+    session_state["sidebar_base_url"] = settings["base_url"]
+    session_state["sidebar_model_name"] = settings["model_name"]
+    session_state["sidebar_api_key"] = settings["api_key"]
+    session_state["sidebar_num_ctx"] = settings["num_ctx"]
+    session_state["last_provider"] = selected_provider
+    return True
 
 
 def init_session_state() -> None:
     """Initializes persistent Streamlit session state keys."""
-    defaults = {
+    defaults: dict[str, object] = {
         "parsed_paper": None,
         "paper_hash": None,
         "analysis_results": {},
         "module_telemetry": {},
+        "module_reasoning": {},
         "chat_messages": [],
         "endpoint_models": [],
         "endpoint_status": "",
+        "endpoint_base_url": "",
+        "last_provider": None,
     }
     for key, val in defaults.items():
         if key not in st.session_state:
@@ -65,7 +177,10 @@ def render_sidebar() -> LLMConfig:
 
         backend_category = st.radio(
             "Inference Backend",
-            options=["Local AI (Ollama / llama.cpp)", "Cloud API (Kimi / OpenAI / Gemini / Claude)"],
+            options=[
+                "Local AI (Ollama / llama.cpp)",
+                "Cloud API (Kimi / OpenAI / Gemini / Claude)",
+            ],
             index=0,
         )
 
@@ -90,33 +205,40 @@ def render_sidebar() -> LLMConfig:
             format_func=lambda p: p.value,
         )
 
-        defaults = PROVIDER_DEFAULTS[selected_provider]
+        sync_provider_state(st.session_state, selected_provider)
+
         base_url = st.text_input(
             "Base URL (OpenAI-Compatible)",
-            value=os.getenv("LLM_BASE_URL", str(defaults["base_url"])),
+            key="sidebar_base_url",
         )
 
+        # Clear stale detected models if the user manually edits the Base URL
+        if (
+            st.session_state["endpoint_models"]
+            and st.session_state["endpoint_base_url"]
+            and st.session_state["endpoint_base_url"] != base_url
+        ):
+            st.session_state["endpoint_models"] = []
+            st.session_state["endpoint_status"] = ""
+            st.session_state["endpoint_base_url"] = ""
+
         # Hide API Key in Local Mode unless Custom Endpoint is chosen
-        if backend_category.startswith("Local AI") and selected_provider != ProviderMode.CUSTOM_ENDPOINT:
+        if (
+            backend_category.startswith("Local AI")
+            and selected_provider != ProviderMode.CUSTOM_ENDPOINT
+        ):
             api_key = "local-no-key-required"
             st.caption("🔒 **Local Mode Active:** No API key required; data stays on-device.")
         else:
-            env_key = (
-                os.getenv("MOONSHOT_API_KEY")
-                or os.getenv("OPENAI_API_KEY")
-                or os.getenv("GEMINI_API_KEY")
-                or os.getenv("LLM_API_KEY")
-                or ""
-            )
             api_key = st.text_input(
                 "API Key",
-                value=env_key,
+                key="sidebar_api_key",
                 type="password",
                 help="Required for Cloud APIs (Moonshot/Kimi, OpenAI, Gemini, Anthropic).",
             )
 
         # Optional button to query live models from local Ollama/llama.cpp or Cloud endpoint
-        col_ping, col_hint = st.columns([1, 1])
+        col_ping, _col_hint = st.columns([1, 1])
         with col_ping:
             if st.button("🔍 Detect Models", use_container_width=True):
                 ok, models, msg = HybridLLMEngine.check_endpoint_and_list_models(
@@ -124,6 +246,7 @@ def render_sidebar() -> LLMConfig:
                 )
                 st.session_state["endpoint_models"] = models if ok else []
                 st.session_state["endpoint_status"] = msg
+                st.session_state["endpoint_base_url"] = base_url if ok else ""
 
         if st.session_state["endpoint_status"]:
             st.caption(st.session_state["endpoint_status"])
@@ -136,8 +259,11 @@ def render_sidebar() -> LLMConfig:
         else:
             model_name = st.text_input(
                 "Model Name",
-                value=os.getenv("LLM_MODEL_NAME", str(defaults["default_model"])),
-                help="Examples: qwen2.5:7b-instruct, llama3.1:8b, deepseek-r1:8b, kimi-k2-0711-preview, gpt-4o",
+                key="sidebar_model_name",
+                help=(
+                    "Examples: qwen2.5:7b-instruct, llama3.1:8b, deepseek-r1:8b, "
+                    "kimi-k2-0711-preview, gpt-4o"
+                ),
             )
 
         st.divider()
@@ -175,8 +301,8 @@ def render_sidebar() -> LLMConfig:
         with col_ctx:
             num_ctx = st.select_slider(
                 "Context Window (num_ctx)",
-                options=[8192, 16384, 32768, 65536, 131072, 200000],
-                value=int(defaults["default_ctx"]),
+                options=CTX_OPTIONS,
+                key="sidebar_num_ctx",
             )
 
         max_output_tokens = st.slider(
@@ -211,7 +337,11 @@ def render_paper_telemetry(paper: ParsedPaper, resolved_strategy: ExecutionStrat
     c2.metric(
         "Est. Tokens (Cleaned)",
         f"{paper.total_tokens_cleaned:,}",
-        delta=f"-{paper.reference_tokens_saved:,} ref tokens" if paper.reference_tokens_saved > 0 else "0 stripped",
+        delta=(
+            f"-{paper.reference_tokens_saved:,} ref tokens"
+            if paper.reference_tokens_saved > 0
+            else "0 stripped"
+        ),
         delta_color="normal",
     )
     c3.metric("Detected Sections", f"{len(paper.sections)}")
@@ -227,7 +357,8 @@ def render_paper_telemetry(paper: ParsedPaper, resolved_strategy: ExecutionStrat
             st.markdown("**Detected Canonical Sections & Token Breakdown**")
             for sec_name, sec_text in paper.sections.items():
                 st.markdown(
-                    f"- **{sec_name}**: `{len(sec_text):,}` chars (~`{int(len(sec_text)/3.8):,}` tokens)"
+                    f"- **{sec_name}**: `{len(sec_text):,}` chars "
+                    f"(~`{estimate_tokens(sec_text):,}` tokens)"
                 )
             if paper.references_text:
                 st.markdown(
@@ -236,12 +367,56 @@ def render_paper_telemetry(paper: ParsedPaper, resolved_strategy: ExecutionStrat
         with tbl_col:
             st.markdown(f"**Explicitly Extracted Benchmark Tables ({len(paper.tables)})**")
             if not paper.tables:
-                st.info("No explicit grid tables found; numeric metrics will be parsed from Markdown body.")
+                st.info(
+                    "No explicit grid tables found; numeric metrics will be parsed from Markdown body."
+                )
             else:
                 for tbl in paper.tables:
                     st.markdown(f"**{tbl.table_id}** (Page {tbl.page_number}): *{tbl.caption}*")
                     st.markdown(tbl.markdown)
                     st.divider()
+
+
+def render_export_buttons(
+    md_slot: st.delta_generator.DeltaGenerator,
+    json_slot: st.delta_generator.DeltaGenerator,
+    paper: ParsedPaper,
+    results: dict[str, str],
+    model_name: str,
+    strategy_name: str,
+) -> None:
+    """Renders Markdown and JSON download buttons reflecting the current teardown state."""
+    has_results = len(results) > 0
+
+    md_report = PaperAnalyzer.export_to_markdown(
+        paper=paper,
+        results=results,
+        model_name=model_name,
+        strategy_name=strategy_name,
+    )
+    md_slot.download_button(
+        label="📥 Export Report (.md)",
+        data=md_report.encode("utf-8"),
+        file_name=sanitize_export_filename(paper.title, "md"),
+        mime="text/markdown",
+        use_container_width=True,
+        disabled=not has_results,
+    )
+
+    json_report = PaperAnalyzer.export_to_json(
+        paper=paper,
+        results=results,
+        model_name=model_name,
+        strategy_name=strategy_name,
+    )
+    json_slot.download_button(
+        label="📦 Export Data (.json)",
+        data=json_report.encode("utf-8"),
+        file_name=sanitize_export_filename(paper.title, "json"),
+        mime="application/json",
+        use_container_width=True,
+        disabled=not has_results,
+    )
 
 
 def run_and_stream_module(
@@ -262,18 +437,34 @@ def run_and_stream_module(
             full_response = st.write_stream(stream_gen)
             st.session_state["analysis_results"][module.value] = str(full_response)
             st.session_state["module_telemetry"][module.value] = telemetry
+
+            reasoning_trace = analyzer.engine.last_reasoning_content.strip()
+            if reasoning_trace:
+                st.session_state["module_reasoning"][module.value] = reasoning_trace
+                with st.expander("🧠 Model Reasoning Trace", expanded=False):
+                    st.markdown(reasoning_trace)
+            else:
+                st.session_state["module_reasoning"].pop(module.value, None)
         except Exception as exc:
             st.error(f"Error during `{MODULE_TITLES[module]}`: {exc}")
 
 
 def main() -> None:
+    st.set_page_config(
+        page_title="Paper Scalpel — Research Paper Deep Teardown Studio",
+        page_icon="🔬",
+        layout="wide",
+        initial_sidebar_state="expanded",
+    )
+
     init_session_state()
     llm_config = render_sidebar()
 
-    st.title("🔬 Research Paper Deep Technical Analyzer")
+    st.title("🔬 Paper Scalpel: Research Paper Deep Technical Analyzer")
     st.markdown(
         "Upload any multi-column academic PDF to extract reading-order LaTeX & benchmark tables, "
-        "then run an anti-hallucination architectural teardown via **Local AI (Ollama / llama.cpp)** or **Cloud Frontier APIs**."
+        "then run an anti-hallucination architectural teardown via **Local AI (Ollama / llama.cpp)** "
+        "or **Cloud Frontier APIs**."
     )
 
     uploaded_file = st.file_uploader(
@@ -284,7 +475,8 @@ def main() -> None:
 
     if uploaded_file is None:
         st.info(
-            "👆 Upload a research paper PDF above to inspect its parsed sections, benchmark tables, and launch the 4-stage technical teardown."
+            "👆 Upload a research paper PDF above to inspect its parsed sections, benchmark tables, "
+            "and launch the 4-stage technical teardown."
         )
         return
 
@@ -294,7 +486,9 @@ def main() -> None:
     ).hexdigest()
 
     if st.session_state["paper_hash"] != current_hash:
-        with st.spinner("Parsing multi-column PDF layout, LaTeX equations, sections, and benchmark tables..."):
+        with st.spinner(
+            "Parsing multi-column PDF layout, LaTeX equations, sections, and benchmark tables..."
+        ):
             parsed_paper = cached_parse_pdf(
                 pdf_bytes, strip_references=llm_config.strip_references
             )
@@ -302,6 +496,7 @@ def main() -> None:
             st.session_state["paper_hash"] = current_hash
             st.session_state["analysis_results"] = {}
             st.session_state["module_telemetry"] = {}
+            st.session_state["module_reasoning"] = {}
             st.session_state["chat_messages"] = []
 
     paper: ParsedPaper = st.session_state["parsed_paper"]
@@ -310,7 +505,7 @@ def main() -> None:
 
     render_paper_telemetry(paper, analyzer.effective_strategy)
 
-    # Action bar: Run All vs. Export Report
+    # Action bar: reserve slots for export buttons so they reflect post-teardown state immediately
     action_col1, action_col2, action_col3 = st.columns([2, 1, 1])
     with action_col1:
         run_all_clicked = st.button(
@@ -318,38 +513,10 @@ def main() -> None:
             type="primary",
             use_container_width=True,
         )
-
     with action_col2:
-        md_report = PaperAnalyzer.export_to_markdown(
-            paper=paper,
-            results=st.session_state["analysis_results"],
-            model_name=llm_config.model_name,
-            strategy_name=analyzer.effective_strategy.value,
-        )
-        st.download_button(
-            label="📥 Export Report (.md)",
-            data=md_report.encode("utf-8"),
-            file_name=f"{paper.title[:45].replace(' ', '_')}_teardown.md",
-            mime="text/markdown",
-            use_container_width=True,
-            disabled=len(st.session_state["analysis_results"]) == 0,
-        )
-
+        md_download_slot = st.empty()
     with action_col3:
-        json_report = PaperAnalyzer.export_to_json(
-            paper=paper,
-            results=st.session_state["analysis_results"],
-            model_name=llm_config.model_name,
-            strategy_name=analyzer.effective_strategy.value,
-        )
-        st.download_button(
-            label="📦 Export Data (.json)",
-            data=json_report.encode("utf-8"),
-            file_name=f"{paper.title[:45].replace(' ', '_')}_teardown.json",
-            mime="application/json",
-            use_container_width=True,
-            disabled=len(st.session_state["analysis_results"]) == 0,
-        )
+        json_download_slot = st.empty()
 
     # 5 Interactive Workspace Tabs
     tab_summary, tab_math, tab_bench, tab_critique, tab_chat = st.tabs(
@@ -386,7 +553,7 @@ def main() -> None:
                     st.subheader(MODULE_TITLES[module])
                 with btn_col:
                     rerun_single = st.button(
-                        f"▶️ Run Module",
+                        "▶️ Run Module",
                         key=f"btn_{module.value}",
                         use_container_width=True,
                     )
@@ -404,17 +571,33 @@ def main() -> None:
                             f"Model=`{telemetry['model']}`"
                         )
                     st.markdown(st.session_state["analysis_results"][module.value])
+                    reasoning_trace = st.session_state["module_reasoning"].get(module.value)
+                    if reasoning_trace:
+                        with st.expander("🧠 Model Reasoning Trace", expanded=False):
+                            st.markdown(reasoning_trace)
                 else:
                     st.info(
-                        f"Click **▶️ Run Module** on the right or **🚀 Run Full 4-Module Technical Teardown** above to generate `{MODULE_TITLES[module]}`."
+                        f"Click **▶️ Run Module** on the right or **🚀 Run Full 4-Module Technical "
+                        f"Teardown** above to generate `{MODULE_TITLES[module]}`."
                     )
+
+    # Populate top-bar export buttons after module execution so they enable immediately
+    render_export_buttons(
+        md_slot=md_download_slot,
+        json_slot=json_download_slot,
+        paper=paper,
+        results=st.session_state["analysis_results"],
+        model_name=llm_config.model_name,
+        strategy_name=analyzer.effective_strategy.value,
+    )
 
     # Tab 5: Context-Grounded Paper Chat (RAG / Section-Routed Q&A)
     with tab_chat:
         st.subheader("💬 Context-Grounded Technical Q&A")
         st.caption(
-            "Ask specific questions about proofs, hyperparameters, equations, or benchmark anomalies. "
-            "Responses are strictly grounded in the parsed paper sections and extracted tables."
+            "Ask specific questions about proofs, hyperparameters, equations, or benchmark "
+            "anomalies. Responses are strictly grounded in the parsed paper sections and "
+            "extracted tables."
         )
 
         for msg in st.session_state["chat_messages"]:
@@ -422,7 +605,8 @@ def main() -> None:
                 st.markdown(msg["content"])
 
         user_question = st.chat_input(
-            "Ask a deep technical question (e.g., 'What is the exact complexity of Eq. 5 and how was Table 3 ablated?')"
+            "Ask a deep technical question (e.g., 'What is the exact complexity of Eq. 5 "
+            "and how was Table 3 ablated?')"
         )
         if user_question:
             with st.chat_message("user"):
@@ -435,9 +619,14 @@ def main() -> None:
                         chat_history=st.session_state["chat_messages"],
                     )
                     st.caption(
-                        f"📌 *Grounded in sections: {', '.join(cited_sections)} + Extracted Benchmark Tables*"
+                        f"📌 *Grounded in sections: {', '.join(cited_sections)} "
+                        "+ Extracted Benchmark Tables*"
                     )
                     answer_text = st.write_stream(stream_gen)
+                    reasoning_trace = analyzer.engine.last_reasoning_content.strip()
+                    if reasoning_trace:
+                        with st.expander("🧠 Model Reasoning Trace", expanded=False):
+                            st.markdown(reasoning_trace)
                     st.session_state["chat_messages"].append(
                         {"role": "user", "content": user_question}
                     )

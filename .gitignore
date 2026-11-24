@@ -1,0 +1,32 @@
+# Python bytecode & caches
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environments
+.venv/
+venv/
+ENV/
+env/
+
+# Local environment secrets (keep .env.example tracked)
+.env
+.env.local
+
+# Local/uploaded PDFs
+*.pdf
+
+# Test, lint & coverage caches
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+
+# Build & packaging artifacts
+build/
+dist/
+*.egg-info/
+
+# OS / editor noise
+.DS_Store

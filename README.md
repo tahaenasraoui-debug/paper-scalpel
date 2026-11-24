@@ -1,4 +1,4 @@
-#  Paper Scalper : A Research Paper Deep Technical Analyzer
+# Paper Scalpel: A Research Paper Deep Technical Analyzer
 
 ![Python 3.10+](https://img.shields.io/badge/Python-3.10%2B-blue.svg)
 ![Streamlit](https://img.shields.io/badge/UI-Streamlit%201.42-FF4B4B.svg)
@@ -99,15 +99,18 @@ This application solves both problems through a **layout-aware PyMuPDF ingestion
 ## Project Structure
 
 ```text
-research-paper-analyzer/
-├── requirements.txt      # Pinned production dependencies
-├── .env.example          # Optional environment variable template
-├── README.md             # Project documentation
-├── parser.py             # Layout-aware PDF, section, equation & table parser
-├── prompts.py            # Anti-hallucination system prompts & task templates
-├── llm_engine.py         # Unified Local (Ollama/llama.cpp) & Cloud OpenAI SDK router
-├── analyzer.py           # Full-Context vs. Section-Routed Map-Reduce orchestrator
-└── app.py                # Streamlit interactive UI with live token streaming & export
+paper-scalpel/
+├── requirements.txt             # Pinned production dependencies
+├── pyproject.toml               # Ruff linter and pytest configuration
+├── .env.example                 # Optional environment variable template
+├── README.md                    # Project documentation
+├── parser.py                    # Layout-aware PDF, section, equation & table parser
+├── prompts.py                   # Anti-hallucination system prompts & task templates
+├── llm_engine.py                # Unified Local (Ollama/llama.cpp) & Cloud OpenAI SDK router
+├── analyzer.py                  # Full-Context vs. Section-Routed Map-Reduce orchestrator
+├── app.py                       # Streamlit interactive UI with live token streaming & export
+├── tests/                       # Pytest unit test suite
+└── .github/workflows/ci.yml     # Automated lint (ruff) and test (pytest) CI workflow
 ```
 
 ---
@@ -117,8 +120,8 @@ research-paper-analyzer/
 ### 1. Clone & Create a Virtual Environment
 
 ```bash
-git clone [https://github.com/your-username/research-paper-analyzer.git](https://github.com/your-username/research-paper-analyzer.git)
-cd research-paper-analyzer
+git clone https://github.com/tahaenasraoui-debug/paper-scalpel.git
+cd paper-scalpel
 
 python -m venv .venv
 source .venv/bin/activate  # On Windows: .venv\Scripts\activate
@@ -133,13 +136,18 @@ pip install -r requirements.txt
 
 ### 3. Configure Environment Variables (Optional)
 
-Create a `.env` file in the root directory if you want pre-filled Cloud API keys or custom defaults:
+Copy `.env.example` to `.env` in the root directory if you want pre-filled Cloud API keys or custom defaults:
+
+```bash
+cp .env.example .env
+```
 
 ```ini
 # Optional Cloud API Keys
 MOONSHOT_API_KEY="sk-your-moonshot-api-key"
 OPENAI_API_KEY="sk-your-openai-api-key"
 GEMINI_API_KEY="your-gemini-api-key"
+ANTHROPIC_API_KEY="sk-ant-your-anthropic-api-key"
 
 # Optional Custom Defaults
 LLM_BASE_URL="http://localhost:11434/v1"

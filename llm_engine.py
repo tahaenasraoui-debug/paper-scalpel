@@ -7,9 +7,9 @@ with real-time token streaming and VRAM-aware context window sizing.
 
 from __future__ import annotations
 
+from collections.abc import Generator
 from dataclasses import dataclass
 from enum import Enum
-from typing import Dict, Generator, List, Optional, Tuple
 
 import httpx
 from openai import APIConnectionError, APIStatusError, OpenAI
@@ -31,7 +31,7 @@ class ExecutionStrategy(str, Enum):
     SECTION_ROUTED = "Section-Routed Map-Reduce (VRAM-Safe Local Mode)"
 
 
-PROVIDER_DEFAULTS: Dict[ProviderMode, Dict[str, object]] = {
+PROVIDER_DEFAULTS: dict[ProviderMode, dict[str, object]] = {
     ProviderMode.LOCAL_OLLAMA: {
         "base_url": "http://localhost:11434/v1",
         "default_model": "qwen2.5:7b-instruct",
@@ -100,6 +100,14 @@ class LLMConfig:
         )
 
 
+@dataclass(frozen=True)
+class StreamChunk:
+    """Represents a single streamed token chunk tagged by output channel."""
+
+    kind: str  # "content" or "reasoning"
+    text: str
+
+
 class HybridLLMEngine:
     """
     Unified OpenAI-compatible client supporting both Local AI (Ollama / llama.cpp)
@@ -108,6 +116,7 @@ class HybridLLMEngine:
 
     def __init__(self, config: LLMConfig) -> None:
         self.config = config
+        self.last_reasoning_content: str = ""
         effective_key = (
             config.api_key.strip()
             if config.api_key and config.api_key.strip()
@@ -136,34 +145,44 @@ class HybridLLMEngine:
             return ExecutionStrategy.SECTION_ROUTED
         return ExecutionStrategy.FULL_CONTEXT
 
-    def stream_completion(
+    def stream_completion_events(
         self,
         system_prompt: str,
         user_prompt: str,
-        conversation_history: Optional[List[Dict[str, str]]] = None,
-    ) -> Generator[str, None, None]:
+        conversation_history: list[dict[str, str]] | None = None,
+        max_tokens: int | None = None,
+    ) -> Generator[StreamChunk, None, None]:
         """
-        Streams tokens from either Local Ollama/llama.cpp or Cloud APIs.
-        Automatically injects `options.num_ctx` when communicating with Ollama.
+        Streams structured `StreamChunk` events (`reasoning` vs `content`) from either
+        Local Ollama/llama.cpp or Cloud APIs.
+        Automatically injects `options.num_ctx` when communicating with Ollama and
+        accumulates DeepSeek-R1 `reasoning_content` in `self.last_reasoning_content`.
         """
-        messages: List[Dict[str, str]] = [{"role": "system", "content": system_prompt}]
+        self.last_reasoning_content = ""
+        reasoning_parts: list[str] = []
+
+        messages: list[dict[str, str]] = [{"role": "system", "content": system_prompt}]
         if conversation_history:
             messages.extend(conversation_history)
         messages.append({"role": "user", "content": user_prompt})
 
-        extra_body: Dict[str, object] = {}
+        extra_body: dict[str, object] = {}
         if self.config.provider_mode == ProviderMode.LOCAL_OLLAMA or ":11434" in self.config.base_url:
             extra_body["options"] = {
                 "num_ctx": int(self.config.num_ctx),
                 "temperature": float(self.config.temperature),
             }
 
+        effective_max_tokens = (
+            int(max_tokens) if max_tokens is not None else int(self.config.max_output_tokens)
+        )
+
         try:
-            request_kwargs: Dict[str, object] = {
+            request_kwargs: dict[str, object] = {
                 "model": self.config.model_name.strip(),
                 "messages": messages,
                 "temperature": float(self.config.temperature),
-                "max_tokens": int(self.config.max_output_tokens),
+                "max_tokens": effective_max_tokens,
                 "stream": True,
             }
             if extra_body:
@@ -175,13 +194,15 @@ class HybridLLMEngine:
                 if not chunk.choices:
                     continue
                 delta = chunk.choices[0].delta
-                # Support DeepSeek-R1 reasoning_content if exposed by local/cloud server
+                # Keep DeepSeek-R1 reasoning_content cleanly separated from final content
                 reasoning_piece = getattr(delta, "reasoning_content", None)
-                if reasoning_piece:
-                    yield reasoning_piece
+                if isinstance(reasoning_piece, str) and reasoning_piece:
+                    reasoning_parts.append(reasoning_piece)
+                    self.last_reasoning_content = "".join(reasoning_parts)
+                    yield StreamChunk(kind="reasoning", text=reasoning_piece)
                 content_piece = getattr(delta, "content", None)
-                if content_piece:
-                    yield content_piece
+                if isinstance(content_piece, str) and content_piece:
+                    yield StreamChunk(kind="content", text=content_piece)
 
         except APIConnectionError as exc:
             endpoint = self.config.base_url
@@ -197,10 +218,35 @@ class HybridLLMEngine:
         except Exception as exc:
             raise RuntimeError(f"LLM inference error: {exc}") from exc
 
+    def stream_completion(
+        self,
+        system_prompt: str,
+        user_prompt: str,
+        conversation_history: list[dict[str, str]] | None = None,
+        max_tokens: int | None = None,
+        reasoning_buffer: list[str] | None = None,
+    ) -> Generator[str, None, None]:
+        """
+        Streams final assistant `content` tokens from Local AI or Cloud APIs.
+        DeepSeek-R1 `reasoning_content` is kept strictly out of the final output stream
+        and exposed via `self.last_reasoning_content` (and `reasoning_buffer` if provided).
+        """
+        for event in self.stream_completion_events(
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            conversation_history=conversation_history,
+            max_tokens=max_tokens,
+        ):
+            if event.kind == "reasoning":
+                if reasoning_buffer is not None:
+                    reasoning_buffer.append(event.text)
+                continue
+            yield event.text
+
     @staticmethod
     def check_endpoint_and_list_models(
         base_url: str, api_key: str = "local-no-key-required"
-    ) -> Tuple[bool, List[str], str]:
+    ) -> tuple[bool, list[str], str]:
         """
         Tests connectivity to the configured endpoint and returns available model IDs.
         Works with Ollama, llama.cpp, OpenAI, and Moonshot.

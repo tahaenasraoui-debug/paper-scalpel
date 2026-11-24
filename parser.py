@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Tuple
 
 import fitz  # PyMuPDF
 import pymupdf4llm
@@ -21,7 +20,7 @@ except Exception:
     _ENCODER = None
 
 
-CANONICAL_SECTIONS: Tuple[str, ...] = (
+CANONICAL_SECTIONS: tuple[str, ...] = (
     "Abstract",
     "Introduction",
     "Related Work",
@@ -50,9 +49,9 @@ class ParsedPaper:
     page_count: int
     raw_markdown: str
     cleaned_markdown: str
-    sections: Dict[str, str] = field(default_factory=dict)
+    sections: dict[str, str] = field(default_factory=dict)
     references_text: str = ""
-    tables: List[ExtractedTable] = field(default_factory=list)
+    tables: list[ExtractedTable] = field(default_factory=list)
     total_tokens_raw: int = 0
     total_tokens_cleaned: int = 0
     reference_tokens_saved: int = 0
@@ -61,7 +60,7 @@ class ParsedPaper:
         """Formats all explicitly extracted tables into a single Markdown digest."""
         if not self.tables:
             return "No explicit grid tables detected by PyMuPDF table finder."
-        blocks: List[str] = []
+        blocks: list[str] = []
         for tbl in self.tables:
             caption_str = f" — {tbl.caption}" if tbl.caption else ""
             blocks.append(
@@ -92,7 +91,7 @@ class AcademicPaperParser:
     """
 
     # Maps normalized academic heading patterns to canonical buckets
-    SECTION_PATTERNS: List[Tuple[str, re.Pattern]] = [
+    SECTION_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
         (
             "Abstract",
             re.compile(r"^\s*abstract\b", re.IGNORECASE),
@@ -100,42 +99,42 @@ class AcademicPaperParser:
         (
             "Introduction",
             re.compile(
-                r"^\s*(?:[0-9IVX]+[\.\s]+)?(?:introduction|background\s+and\s+motivation|overview)\b",
+                r"^\s*(?:[0-9IVX]+(?:\.[0-9]+)*[\.\s]+)?(?:introduction|background\s+and\s+motivation|overview)\b",
                 re.IGNORECASE,
             ),
         ),
         (
             "Related Work",
             re.compile(
-                r"^\s*(?:[0-9IVX]+[\.\s]+)?(?:related\s+works?|prior\s+works?|literature\s+review|preliminaries|background)\b",
+                r"^\s*(?:[0-9IVX]+(?:\.[0-9]+)*[\.\s]+)?(?:related\s+works?|prior\s+works?|literature\s+review|preliminaries|background)\b",
                 re.IGNORECASE,
             ),
         ),
         (
             "Methodology",
             re.compile(
-                r"^\s*(?:[0-9IVX]+[\.\s]+)?(?:method(?:ology|s)?|proposed\s+(?:method|approach|framework|architecture|system)|approach|model(?:\s+architecture)?|formulation|technical\s+approach|system\s+design|algorithm)\b",
+                r"^\s*(?:[0-9IVX]+(?:\.[0-9]+)*[\.\s]+)?(?:method(?:ology|s)?|proposed\s+(?:method|approach|framework|architecture|system)|approach|model(?:\s+architecture)?|formulation|technical\s+approach|system\s+design|algorithm)\b",
                 re.IGNORECASE,
             ),
         ),
         (
             "Experiments & Benchmarks",
             re.compile(
-                r"^\s*(?:[0-9IVX]+[\.\s]+)?(?:experiments?(?:\s+and\s+results)?|empirical\s+evaluation|evaluation|results?(?:\s+and\s+discussion|\s+and\s+analysis)?|benchmarks?|ablation\s+stud(?:y|ies)|performance\s+analysis)\b",
+                r"^\s*(?:[0-9IVX]+(?:\.[0-9]+)*[\.\s]+)?(?:experiments?(?:\s+and\s+results)?|empirical\s+evaluation|evaluation|results?(?:\s+and\s+discussion|\s+and\s+analysis)?|benchmarks?|ablation\s+stud(?:y|ies)|performance\s+analysis)\b",
                 re.IGNORECASE,
             ),
         ),
         (
             "Limitations",
             re.compile(
-                r"^\s*(?:[0-9IVX]+[\.\s]+)?(?:limitations?(?:\s+and\s+future\s+work)?|broader\s+impact|discussion(?:\s+and\s+limitations)?|threats\s+to\s+validity|failure\s+modes)\b",
+                r"^\s*(?:[0-9IVX]+(?:\.[0-9]+)*[\.\s]+)?(?:limitations?(?:\s+and\s+future\s+work)?|broader\s+impact|discussion(?:\s+and\s+limitations)?|threats\s+to\s+validity|failure\s+modes)\b",
                 re.IGNORECASE,
             ),
         ),
         (
             "Conclusion",
             re.compile(
-                r"^\s*(?:[0-9IVX]+[\.\s]+)?(?:conclusions?(?:\s+and\s+future\s+work)?|concluding\s+remarks|summary(?:\s+and\s+conclusion)?)\b",
+                r"^\s*(?:[0-9IVX]+(?:\.[0-9]+)*[\.\s]+)?(?:conclusions?(?:\s+and\s+future\s+work)?|concluding\s+remarks|summary(?:\s+and\s+conclusion)?)\b",
                 re.IGNORECASE,
             ),
         ),
@@ -149,23 +148,237 @@ class AcademicPaperParser:
         (
             "Appendix",
             re.compile(
-                r"^\s*(?:[A-Z0-9]+[\.\s]+)?(?:appendix|appendices|supplementary\s+material|additional\s+(?:results|experiments|details)|proofs?)\b",
+                r"^\s*(?:[A-Z0-9]+(?:\.[0-9]+)*[\.\s]+)?(?:appendix|appendices|supplementary\s+material|additional\s+(?:results|experiments|details)|proofs?)\b",
                 re.IGNORECASE,
             ),
         ),
     ]
 
-    HEADING_LINE_RE = re.compile(
-        r"^(?:#{1,4}\s+|\*\*(?=[0-9IVX]+\b|Abstract\b|References\b|Appendix\b))?(?P<title>[^\n]{2,110}?)(?:\*\*)?\s*$"
-    )
-
-     numbered_section_re = re.compile(
-        r"^(?:#{1,4}\s*)?(?:[0-9]{1,2}|[IVX]{1,4})(?:\.[0-9]{1,2})*\s+[A-Z][A-Za-z0-9\s\-:,/&]{2,80}$"
+    numbered_section_re = re.compile(
+        r"^(?:#{1,4}\s*)?(?:(?:[0-9]{1,2}|[IVX]{1,4})(?:\.[0-9]{1,2})*\.?|[A-Z](?:\.[0-9]{1,2})+\.?|[A-Z]\.)\s+[A-Z][A-Za-z0-9\s\-:,/&]{2,80}$"
     )
 
     TABLE_CAPTION_RE = re.compile(
         r"(Table\s+\d+[\s\.:\-—]+[^\n]{5,220})",
         re.IGNORECASE,
+    )
+
+    ABSTRACT_MAX_WORDS_BEFORE_AUTO_INTRO = 400
+
+    # Standalone compound prefixes commonly hyphenated across academic text wraps
+    _COMPOUND_PREFIXES: frozenset[str] = frozenset(
+        {
+            "self",
+            "multi",
+            "cross",
+            "fine",
+            "zero",
+            "one",
+            "two",
+            "three",
+            "four",
+            "five",
+            "few",
+            "non",
+            "semi",
+            "quasi",
+            "pseudo",
+            "meta",
+            "low",
+            "high",
+            "mid",
+            "long",
+            "short",
+            "full",
+            "half",
+            "large",
+            "small",
+            "real",
+            "open",
+            "closed",
+            "well",
+            "fast",
+            "slow",
+            "hard",
+            "single",
+            "double",
+            "dual",
+            "joint",
+            "sparse",
+            "dense",
+            "global",
+            "local",
+            "static",
+            "dynamic",
+            "online",
+            "offline",
+        }
+    )
+
+    # Known compound head/suffix words (applied when left side is not a bound syllable)
+    _COMPOUND_SUFFIXES: frozenset[str] = frozenset(
+        {
+            "based",
+            "driven",
+            "guided",
+            "aware",
+            "free",
+            "level",
+            "wise",
+            "specific",
+            "agnostic",
+            "efficient",
+            "friendly",
+            "centric",
+            "oriented",
+            "shot",
+            "scale",
+            "rank",
+            "time",
+            "stage",
+            "norm",
+            "tuning",
+            "tuned",
+            "training",
+            "trained",
+            "supervised",
+            "attention",
+            "entropy",
+            "linear",
+            "quadratic",
+            "modal",
+            "column",
+            "cache",
+            "head",
+            "heads",
+            "step",
+            "steps",
+            "layer",
+            "layers",
+            "bound",
+            "invariant",
+            "equivariant",
+            "conditioned",
+            "augmented",
+            "aligned",
+            "regularized",
+            "quantized",
+            "distilled",
+            "pruned",
+            "sparse",
+            "dense",
+            "parallel",
+            "only",
+            "regressive",
+            "prompt",
+            "forward",
+            "resolution",
+            "context",
+        }
+    )
+
+    # Bound syllable prefixes that often break single English words across lines
+    _BOUND_SYLLABLE_PREFIXES: frozenset[str] = frozenset(
+        {
+            "abs",
+            "acc",
+            "adv",
+            "aff",
+            "agg",
+            "all",
+            "ann",
+            "app",
+            "arr",
+            "ass",
+            "att",
+            "col",
+            "com",
+            "con",
+            "cor",
+            "dis",
+            "for",
+            "mis",
+            "out",
+            "over",
+            "per",
+            "pro",
+            "sur",
+            "tra",
+            "under",
+            "with",
+        }
+    )
+
+    # Inflectional/derivational endings that indicate a split single word (e.g. multi-ple, high-er)
+    _WORD_SPLIT_SUFFIXES: frozenset[str] = frozenset(
+        {
+            "er",
+            "est",
+            "ed",
+            "ing",
+            "ly",
+            "ally",
+            "ness",
+            "ity",
+            "ize",
+            "ised",
+            "ized",
+            "ization",
+            "ple",
+            "ples",
+            "ply",
+            "ment",
+            "ments",
+            "tion",
+            "tions",
+            "sion",
+            "sions",
+            "ance",
+            "ence",
+            "able",
+            "ible",
+            "ous",
+            "ive",
+            "al",
+            "ic",
+            "ical",
+            "ry",
+            "ty",
+            "cy",
+            "ful",
+            "less",
+            "ship",
+            "hood",
+            "ward",
+            "wards",
+        }
+    )
+
+    _CO_COMPOUND_RIGHTS: frozenset[str] = frozenset(
+        {
+            "training",
+            "trained",
+            "attention",
+            "design",
+            "occurrence",
+            "evolution",
+            "adaptation",
+            "teaching",
+        }
+    )
+
+    _IN_COMPOUND_RIGHTS: frozenset[str] = frozenset(
+        {
+            "context",
+            "domain",
+            "distribution",
+            "place",
+            "memory",
+            "loop",
+            "sample",
+            "batch",
+            "house",
+        }
     )
 
     def parse_pdf(self, pdf_bytes: bytes, strip_references: bool = True) -> ParsedPaper:
@@ -218,7 +431,7 @@ class AcademicPaperParser:
         finally:
             doc.close()
 
-    def _extract_title_and_header(self, doc: fitz.Document) -> Tuple[str, str]:
+    def _extract_title_and_header(self, doc: fitz.Document) -> tuple[str, str]:
         """Extracts paper title from PDF metadata or largest font span on page 1."""
         meta_title = (doc.metadata or {}).get("title", "").strip()
         if (
@@ -238,7 +451,7 @@ class AcademicPaperParser:
         first_page = doc[0]
         blocks = first_page.get_text("dict").get("blocks", [])
         max_size = 0.0
-        title_candidates: List[str] = []
+        title_candidates: list[str] = []
 
         for block in blocks:
             if block.get("type") != 0:
@@ -276,12 +489,130 @@ class AcademicPaperParser:
         header_preview = " | ".join(raw_top_lines[1:5])[:300]
         return title[:220], header_preview
 
+    @classmethod
+    def _should_preserve_hyphen(
+        cls, left_tok: str, right_tok: str, inline_compounds: set[str]
+    ) -> bool:
+        """
+        Determines whether a line-break hyphen between `left_tok` and `right_tok`
+        belongs to a real hyphenated compound rather than a mid-word column wrap.
+        """
+        # Chained compounds like end-\nto-end or state-of-\nthe-art
+        if "-" in left_tok or "-" in right_tok:
+            return True
+        # Single-character prefixes (Q-learning, x-axis, n-gram) or suffixes
+        if len(left_tok) == 1 or len(right_tok) == 1:
+            return True
+        # Continuation starting with uppercase or digit (Monte-Carlo, GPT-4, Layer-Norm)
+        if not right_tok[0].islower():
+            return True
+        # Uppercase acronyms or alphanumeric prefixes (KV-cache, OOD-robust, 3D-aware, FP16-training)
+        if left_tok.isupper() or any(ch.isdigit() for ch in left_tok):
+            return True
+
+        left_lower = left_tok.lower()
+        right_lower = right_tok.lower()
+
+        # Already observed intact as an inline hyphenated compound in the same paper
+        if f"{left_lower}-{right_lower}" in inline_compounds:
+            return True
+
+        # Inflectional/derivational endings indicate a split single word (e.g. multi-ple, high-er)
+        if right_lower in cls._WORD_SPLIT_SUFFIXES:
+            return False
+
+        # Standalone compound prefixes (self-attention, multi-head, zero-shot, low-rank, ...)
+        if left_lower in cls._COMPOUND_PREFIXES:
+            return True
+
+        # Targeted 2-letter compound prefixes without breaking co-mpute / in-formation
+        if left_lower == "co" and right_lower in cls._CO_COMPOUND_RIGHTS:
+            return True
+        if left_lower == "in" and right_lower in cls._IN_COMPOUND_RIGHTS:
+            return True
+
+        # Known compound suffixes when left side is not a bound syllable
+        if (
+            len(left_lower) >= 3
+            and left_lower not in cls._BOUND_SYLLABLE_PREFIXES
+            and right_lower in cls._COMPOUND_SUFFIXES
+        ):
+            return True
+
+        return False
+
+    def _unwrap_hyphenated_line_breaks(self, md_text: str) -> str:
+        """
+        Rejoins words hyphenated across column line breaks outside fenced code blocks
+        and Markdown tables while preserving genuine hyphenated compounds.
+        """
+        inline_compounds = {
+            m.lower()
+            for m in re.findall(r"\b[A-Za-z0-9]+(?:-[A-Za-z0-9]+)+\b", md_text)
+        }
+
+        lines = md_text.splitlines()
+        out_lines: list[str] = []
+        in_code_fence = False
+        idx = 0
+        n = len(lines)
+
+        while idx < n:
+            line = lines[idx]
+            stripped = line.strip()
+
+            if stripped.startswith(("```", "~~~")):
+                in_code_fence = not in_code_fence
+                out_lines.append(line)
+                idx += 1
+                continue
+
+            if in_code_fence or stripped.startswith("|"):
+                out_lines.append(line)
+                idx += 1
+                continue
+
+            while idx + 1 < n:
+                next_line = lines[idx + 1]
+                next_stripped = next_line.strip()
+                if (
+                    not next_stripped
+                    or next_stripped.startswith(("|", "#", ">", "```", "~~~", "-", "*", "+"))
+                    or re.match(r"^\d+[\.)]\s", next_stripped)
+                ):
+                    break
+
+                end_match = re.search(r"([A-Za-z0-9]+(?:-[A-Za-z0-9]+)*)-\s*$", line)
+                start_match = re.match(
+                    r"^\s*([A-Za-z0-9]+(?:-[A-Za-z0-9]+)*)(.*)$", next_line
+                )
+                if not end_match or not start_match:
+                    break
+
+                left_tok = end_match.group(1)
+                right_tok = start_match.group(1)
+                rest_of_next = start_match.group(2)
+
+                keep_hyphen = self._should_preserve_hyphen(
+                    left_tok, right_tok, inline_compounds
+                )
+                joined = (
+                    f"{left_tok}-{right_tok}" if keep_hyphen else f"{left_tok}{right_tok}"
+                )
+                line = line[: end_match.start(1)] + joined + rest_of_next
+                idx += 1
+
+            out_lines.append(line)
+            idx += 1
+
+        return "\n".join(out_lines)
+
     def _normalize_equations_and_whitespace(self, md_text: str) -> str:
         """Cleans hyphenated line breaks and normalizes LaTeX display blocks."""
         # Collapse 3+ blank lines into 2
         cleaned = re.sub(r"\n{3,}", "\n\n", md_text)
-        # Rejoin words hyphenated across column wraps outside code/tables
-        cleaned = re.sub(r"([a-z]{2,})-\n([a-z]{2,})", r"\1\2", cleaned)
+        # Rejoin words hyphenated across column wraps while preserving compounds
+        cleaned = self._unwrap_hyphenated_line_breaks(cleaned)
         # Normalize numbered equation markers like "(1)" at end of lines next to math
         cleaned = re.sub(
             r"\n\s*\((\d{1,2}[a-z]?)\)\s*\n",
@@ -292,14 +623,14 @@ class AcademicPaperParser:
 
     def _extract_all_tables(
         self, doc: fitz.Document, full_markdown: str
-    ) -> List[ExtractedTable]:
+    ) -> list[ExtractedTable]:
         """
         Combines PyMuPDF geometric table detection (`page.find_tables()`)
         with Markdown pipe-table extraction so numeric benchmark tables are
         preserved even on borderless Booktabs LaTeX layouts.
         """
-        extracted: List[ExtractedTable] = []
-        seen_signatures = set()
+        extracted: list[ExtractedTable] = []
+        seen_signatures: set[str] = set()
         table_counter = 1
 
         # Pass 1: PyMuPDF native geometric table finder per page
@@ -390,7 +721,7 @@ class AcademicPaperParser:
         digit_chars = sum(ch.isdigit() for ch in md_table)
         return alnum_chars >= 25 and digit_chars >= 2
 
-    def _classify_heading(self, line: str) -> Optional[str]:
+    def _classify_heading(self, line: str) -> str | None:
         """Determines if a Markdown line is a major section heading and maps it."""
         stripped = line.strip()
         if not stripped or len(stripped) > 115 or stripped.startswith("|"):
@@ -426,38 +757,62 @@ class AcademicPaperParser:
 
     def _segment_and_strip_references(
         self, raw_md: str, strip_references: bool = True
-    ) -> Tuple[Dict[str, str], str, str]:
+    ) -> tuple[dict[str, str], str, str]:
         """
         Splits the paper into canonical sections, isolates References,
         and reconstructs a clean Markdown document without bibliography bloat.
         """
-        buckets: Dict[str, List[str]] = {sec: [] for sec in CANONICAL_SECTIONS}
-        references_lines: List[str] = []
+        buckets: dict[str, list[str]] = {sec: [] for sec in CANONICAL_SECTIONS}
+        references_lines: list[str] = []
 
         lines = raw_md.splitlines()
-        current_section = "Abstract"
-        seen_intro = False
+        classified_lines = [self._classify_heading(line) for line in lines]
+        abstract_heading_idx = next(
+            (i for i, sec in enumerate(classified_lines) if sec == "Abstract"),
+            None,
+        )
+        has_explicit_intro = any(sec == "Introduction" for sec in classified_lines)
 
-        # Heuristic: look for explicit "Abstract" in the first 120 lines
-        for idx, line in enumerate(lines):
-            detected = self._classify_heading(line)
+        current_section = "Abstract"
+        seen_body_section = False
+        abstract_word_count = 0
+        prev_line_blank = False
+
+        for idx, (line, detected) in enumerate(zip(lines, classified_lines, strict=True)):
             if detected is not None:
                 current_section = detected
-                if detected == "Introduction":
-                    seen_intro = True
-            else:
-                # If we are still in preamble/Abstract and hit > 350 words before Intro,
-                # keep in Abstract until a heading transitions us.
-                if current_section == "Abstract" and not seen_intro and idx > 140:
-                    current_section = "Introduction"
-                    seen_intro = True
+                if detected != "Abstract":
+                    seen_body_section = True
+            elif (
+                current_section == "Abstract"
+                and not seen_body_section
+                and not has_explicit_intro
+            ):
+                # Count words only after an explicit Abstract heading (if present)
+                # and transition cleanly at a paragraph break if Abstract exceeds
+                # realistic academic length without an explicit Introduction heading.
+                in_abstract_body = (
+                    abstract_heading_idx is None or idx > abstract_heading_idx
+                )
+                stripped = line.strip()
+                if in_abstract_body and stripped:
+                    if (
+                        prev_line_blank
+                        and abstract_word_count >= self.ABSTRACT_MAX_WORDS_BEFORE_AUTO_INTRO
+                    ):
+                        current_section = "Introduction"
+                        seen_body_section = True
+                    else:
+                        abstract_word_count += len(stripped.split())
+
+            prev_line_blank = not line.strip()
 
             if current_section == "References":
                 references_lines.append(line)
             else:
                 buckets.setdefault(current_section, []).append(line)
 
-        sections_dict: Dict[str, str] = {}
+        sections_dict: dict[str, str] = {}
         for sec_name, sec_lines in buckets.items():
             content = "\n".join(sec_lines).strip()
             if content:
@@ -481,7 +836,7 @@ class AcademicPaperParser:
 
         return sections_dict, references_text, cleaned_md
 
-    def _fallback_positional_segmentation(self, raw_md: str) -> Dict[str, str]:
+    def _fallback_positional_segmentation(self, raw_md: str) -> dict[str, str]:
         """
         Positional fallback when a PDF lacks standard section headings
         (e.g., workshop papers or scanned OCR text).

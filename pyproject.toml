@@ -1,0 +1,20 @@
+[project]
+name = "paper-scalpel"
+version = "0.1.0"
+description = "Layout-aware academic PDF parser and hybrid local/cloud LLM technical teardown studio."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+
+[tool.ruff]
+target-version = "py310"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B"]
+ignore = ["E501"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+addopts = "-ra -q"
