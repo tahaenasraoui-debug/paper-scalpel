@@ -1,11 +1,12 @@
 # Paper Scalpel: A Research Paper Deep Technical Analyzer
 
+[![CI](https://github.com/tahaenasraoui-debug/paper-scalpel/actions/workflows/ci.yml/badge.svg)](https://github.com/tahaenasraoui-debug/paper-scalpel/actions/workflows/ci.yml)
 ![Python 3.10+](https://img.shields.io/badge/Python-3.10%2B-blue.svg)
 ![Streamlit](https://img.shields.io/badge/UI-Streamlit%201.42-FF4B4B.svg)
 ![PyMuPDF4LLM](https://img.shields.io/badge/PDF-PyMuPDF4LLM-success.svg)
 ![Local AI](https://img.shields.io/badge/Local%20AI-Ollama%20%7C%20llama.cpp-orange.svg)
 ![Cloud APIs](https://img.shields.io/badge/Cloud-Kimi%20%7C%20OpenAI%20%7C%20Gemini%20%7C%20Claude-purple.svg)
-![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)
+[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 
 A production-grade **Research Paper Analyzer & Technical Teardown Studio** built for ML engineers, systems researchers, and peer reviewers. 
 
@@ -15,7 +16,7 @@ This application solves both problems through a **layout-aware PyMuPDF ingestion
 
 ---
 
-##  Key Architectural Features
+## Key Architectural Features
 
 ### 1. Layout-Aware Academic PDF & Table Parser (`parser.py`)
 - **Two-Column Reading Order:** Uses `pymupdf4llm` and `fitz` (PyMuPDF) to reconstruct natural reading order across complex multi-column conference templates (NeurIPS, ICML, ICLR, CVPR, ACL, IEEE, arXiv).
@@ -47,7 +48,7 @@ This application solves both problems through a **layout-aware PyMuPDF ingestion
 
 ---
 
-##  System Architecture
+## System Architecture
 
 ```text
                        ┌────────────────────────────┐
@@ -156,7 +157,7 @@ LLM_MODEL_NAME="qwen2.5:7b-instruct"
 
 ---
 
-##  Running the Application
+## Running the Application
 
 Start the Streamlit server:
 
@@ -168,7 +169,7 @@ The web UI will open automatically at `http://localhost:8501`.
 
 ---
 
-##  Backend Configuration Guides
+## Backend Configuration Guides
 
 ### Option A: Local AI with Ollama
 1. Start the Ollama daemon and pull an instruction or reasoning model:
@@ -181,7 +182,7 @@ The web UI will open automatically at `http://localhost:8501`.
    ```
 2. In the app sidebar:
    - Select **Local AI (Ollama / llama.cpp)** $\rightarrow$ **Local AI — Ollama (`http://localhost:11434/v1`)**.
-   - Click ** Detect Models** and select your pulled model.
+   - Click **Detect Models** and select your pulled model.
    - Keep **Execution Mode** set to `Auto (Smart Context Routing)` and **Strip References to Save VRAM** enabled.
 
 ### Option B: Local AI with `llama.cpp` (`llama-server`)
@@ -214,14 +215,14 @@ The web UI will open automatically at `http://localhost:8501`.
 
 | GPU VRAM | Recommended Local Quantization | Recommended `num_ctx` | Execution Mode | Strip References? |
 | :--- | :--- | :---: | :--- | :---: |
-| **3 GB – 4 GB** | `Qwen2.5-3B-Instruct (Q4_K_M)` | `8192` | `Section-Routed Map-Reduce` | ✅ Required |
-| **6 GB – 8 GB** | `Qwen2.5-7B-Instruct (Q4_K_M)` / `Llama-3.1-8B (Q4_K_M)` | `16384` | `Section-Routed Map-Reduce` | ✅ Recommended |
-| **12 GB – 16 GB** | `Qwen2.5-14B-Instruct (Q4_K_M)` / `DeepSeek-R1-14B` | `16384 – 32768` | `Auto` | ✅ Recommended |
+| **3 GB – 4 GB** | `Qwen2.5-3B-Instruct (Q4_K_M)` | `8192` | `Section-Routed Map-Reduce` | Required |
+| **6 GB – 8 GB** | `Qwen2.5-7B-Instruct (Q4_K_M)` / `Llama-3.1-8B (Q4_K_M)` | `16384` | `Section-Routed Map-Reduce` | Recommended |
+| **12 GB – 16 GB** | `Qwen2.5-14B-Instruct (Q4_K_M)` / `DeepSeek-R1-14B` | `16384 – 32768` | `Auto` | Recommended |
 | **24 GB+** | `Qwen2.5-32B-Instruct (Q4_K_M)` | `32768 – 65536` | `Full-Context Pass` | Optional |
 
 ---
 
-##  Exporting Reports
+## Exporting Reports
 
 Once one or more analysis modules finish streaming:
 - Click **Export Report (`.md`)** to download a single formatted Markdown file containing paper telemetry, all 4 teardown modules, and an appendix of extracted benchmark tables.
@@ -229,6 +230,6 @@ Once one or more analysis modules finish streaming:
 
 ---
 
-##  License
+## License
 
 Released under the **MIT License**. Free for academic, personal, and commercial use.
