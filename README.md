@@ -1,4 +1,4 @@
-# Paper Scalpel: A Research Paper Deep Technical Analyzer
+# Paper Scalpel
 
 [![CI](https://github.com/tahaenasraoui-debug/paper-scalpel/actions/workflows/ci.yml/badge.svg)](https://github.com/tahaenasraoui-debug/paper-scalpel/actions/workflows/ci.yml)
 ![Python 3.10+](https://img.shields.io/badge/Python-3.10%2B-blue.svg)
@@ -8,15 +8,9 @@
 ![Cloud APIs](https://img.shields.io/badge/Cloud-Kimi%20%7C%20OpenAI%20%7C%20Gemini%20%7C%20Claude-purple.svg)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 
-A production-grade **Research Paper Analyzer & Technical Teardown Studio** built for ML engineers, systems researchers, and peer reviewers. 
+Layout-aware academic PDF parser and technical analysis tool built with Streamlit and PyMuPDF. Extracts two-column text, LaTeX equations, and benchmark tables cleanly, then runs structured analysis using either local LLMs (Ollama / llama.cpp) or OpenAI-compatible cloud APIs — automatically choosing between full-context passes and section-routed map-reduce to fit smaller VRAM/context budgets.
 
-Standard PDF text extractors scramble two-column academic layouts, mangle multi-line LaTeX equations, and flatten benchmark tables into unreadable text streams. Furthermore, feeding an entire 15–30 page paper (plus 4 pages of references) into a local 7B/8B LLM frequently triggers context truncation or VRAM out-of-memory (OOM) errors.
-
-This application solves both problems through a **layout-aware PyMuPDF ingestion pipeline** paired with a **Hybrid Local/Cloud LLM Router** that dynamically switches between **Full-Context Analysis** and **VRAM-Safe Section-Routed Map-Reduce**.
-
----
-
-## Key Architectural Features
+## Features
 
 ### 1. Layout-Aware Academic PDF & Table Parser (`parser.py`)
 - **Two-Column Reading Order:** Uses `pymupdf4llm` and `fitz` (PyMuPDF) to reconstruct natural reading order across complex multi-column conference templates (NeurIPS, ICML, ICLR, CVPR, ACL, IEEE, arXiv).
@@ -26,10 +20,10 @@ This application solves both problems through a **layout-aware PyMuPDF ingestion
 
 ### 2. Hybrid Local + Cloud Inference Engine (`llm_engine.py`)
 - **Local AI Mode (100% On-Device):** Native support for **Ollama** (`http://localhost:11434/v1`) and **llama.cpp `llama-server`** (`http://localhost:8080/v1`) with hardware-aware `num_ctx` injection and DeepSeek-R1 `reasoning_content` streaming support.
-- **Cloud API Mode:** Seamless integration with **Moonshot / Kimi** (`https://api.moonshot.ai/v1`), **OpenAI**, **Google Gemini**, **Anthropic Claude**, or any custom OpenAI-compatible endpoint.
+- **Cloud API Mode:** Works with **Moonshot / Kimi** (`https://api.moonshot.ai/v1`), **OpenAI**, **Google Gemini**, **Anthropic Claude**, or any custom OpenAI-compatible endpoint.
 - **Live Endpoint Discovery:** One-click model detection queries `/v1/models` on your local server or cloud provider to populate available model IDs automatically.
 
-### 3. Smart Execution Strategy (`analyzer.py`)
+### 3. Context Routing (`analyzer.py`)
 - **Full-Context Pass:** Sends the complete cleaned Markdown paper + all extracted benchmark tables in a single pass when running on large-context Cloud APIs (128k–200k context).
 - **Section-Routed Map-Reduce:** Automatically routes only the highest-signal sections to each specialized analysis module when running on local 7B/8B models or constrained context windows (8k–16k), preventing mid-paper truncation and VRAM spikes.
 
@@ -38,15 +32,13 @@ This application solves both problems through a **layout-aware PyMuPDF ingestion
 | **1. Executive Summary & Core Delta** | `Abstract` + `Introduction` + `Conclusion` | Yes |
 | **2. Topics, Taxonomy & Math Formulation** | `Abstract` + `Methodology` + `Introduction` + `Appendix` | No |
 | **3. Benchmarks & Ablations Teardown** | `Experiments & Benchmarks` + `Abstract` + `Conclusion` | Yes |
-| **4. Bottlenecks & Architectural Critique** | `Methodology` + `Experiments & Benchmarks` + `Limitations` + `Conclusion` | Yes |
+| **4. Bottlenecks & Critique** | `Methodology` + `Experiments & Benchmarks` + `Limitations` + `Conclusion` | Yes |
 | **5. Grounded Paper Chat (Q&A)** | Top keyword-scored sections + `Abstract` | Yes |
 
-### 4. Strict Anti-Hallucination Prompts (`prompts.py`)
+### 4. Citation-Grounded Prompts (`prompts.py`)
 - Forces inline bracketed citations for every claim, equation, and metric (`[Sec. 3.2, Eq. 4, Table 2]`).
 - Explicitly flags omitted hyperparameter, hardware, or complexity details as **"Not reported in paper"** rather than guessing.
 - Generates a structured **Reproducibility Audit** and **3 Concrete Engineering Fixes** for identified systems/compute bottlenecks.
-
----
 
 ## System Architecture
 
@@ -95,13 +87,11 @@ This application solves both problems through a **layout-aware PyMuPDF ingestion
                └──────────────────────────────────────────┘
 ```
 
----
-
 ## Project Structure
 
 ```text
 paper-scalpel/
-├── requirements.txt             # Pinned production dependencies
+├── requirements.txt             # Python dependencies
 ├── pyproject.toml               # Ruff linter and pytest configuration
 ├── .env.example                 # Optional environment variable template
 ├── README.md                    # Project documentation
@@ -113,8 +103,6 @@ paper-scalpel/
 ├── tests/                       # Pytest unit test suite
 └── .github/workflows/ci.yml     # Automated lint (ruff) and test (pytest) CI workflow
 ```
-
----
 
 ## Installation & Setup
 
@@ -155,8 +143,6 @@ LLM_BASE_URL="http://localhost:11434/v1"
 LLM_MODEL_NAME="qwen2.5:7b-instruct"
 ```
 
----
-
 ## Running the Application
 
 Start the Streamlit server:
@@ -166,8 +152,6 @@ streamlit run app.py
 ```
 
 The web UI will open automatically at `http://localhost:8501`.
-
----
 
 ## Backend Configuration Guides
 
@@ -181,7 +165,7 @@ The web UI will open automatically at `http://localhost:8501`.
    # ollama pull deepseek-r1:8b
    ```
 2. In the app sidebar:
-   - Select **Local AI (Ollama / llama.cpp)** $\rightarrow$ **Local AI — Ollama (`http://localhost:11434/v1`)**.
+   - Select **Local AI (Ollama / llama.cpp)** -> **Local AI — Ollama (`http://localhost:11434/v1`)**.
    - Click **Detect Models** and select your pulled model.
    - Keep **Execution Mode** set to `Auto (Smart Context Routing)` and **Strip References to Save VRAM** enabled.
 
@@ -196,10 +180,10 @@ The web UI will open automatically at `http://localhost:8501`.
      --ngl 99
    ```
 2. In the app sidebar:
-   - Select **Local AI (Ollama / llama.cpp)** $\rightarrow$ **Local AI — llama.cpp Server (`http://localhost:8080/v1`)**.
+   - Select **Local AI (Ollama / llama.cpp)** -> **Local AI — llama.cpp Server (`http://localhost:8080/v1`)**.
    - Match the sidebar **Context Window (`num_ctx`)** slider to the `-c` flag passed to `llama-server`.
 
-### Option C: Cloud Frontier APIs (Kimi / Moonshot, OpenAI, Gemini, Claude)
+### Option C: Cloud APIs (Kimi / Moonshot, OpenAI, Gemini, Claude)
 1. In the app sidebar, switch **Inference Backend** to **Cloud API**.
 2. Choose your preset:
    - **Moonshot / Kimi:** `https://api.moonshot.ai/v1` (e.g., `kimi-k2-0711-preview` or `moonshot-v1-128k`)
@@ -208,8 +192,6 @@ The web UI will open automatically at `http://localhost:8501`.
    - **Anthropic Claude:** `https://api.anthropic.com/v1/` (e.g., `claude-3-7-sonnet-latest`)
 3. Enter your API key (if not already loaded via `.env`).
 4. Set **Execution Mode** to `Auto` or `Full-Context Pass`.
-
----
 
 ## Hardware & VRAM Tuning Guide (Local Models)
 
@@ -220,15 +202,11 @@ The web UI will open automatically at `http://localhost:8501`.
 | **12 GB – 16 GB** | `Qwen2.5-14B-Instruct (Q4_K_M)` / `DeepSeek-R1-14B` | `16384 – 32768` | `Auto` | Recommended |
 | **24 GB+** | `Qwen2.5-32B-Instruct (Q4_K_M)` | `32768 – 65536` | `Full-Context Pass` | Optional |
 
----
-
 ## Exporting Reports
 
 Once one or more analysis modules finish streaming:
-- Click **Export Report (`.md`)** to download a single formatted Markdown file containing paper telemetry, all 4 teardown modules, and an appendix of extracted benchmark tables.
+- Click **Export Report (`.md`)** to download a single formatted Markdown file containing paper metadata, all 4 analysis modules, and an appendix of extracted benchmark tables.
 - Click **Export Data (`.json`)** to download a structured JSON document containing token statistics, detected section names, raw table schemas, and module outputs for downstream pipelines or vector indexing.
-
----
 
 ## Contributing
 
@@ -249,8 +227,6 @@ Contributions, bug reports, and feature suggestions are welcome. For larger chan
 Never commit API keys, `.env` files, or copyrighted PDFs.
 
 When reporting bugs, please include steps to reproduce, expected vs. actual behavior, and your environment details (OS, Python version, and LLM backend).
-
----
 
 ## License
 
